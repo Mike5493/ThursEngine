@@ -168,9 +168,7 @@ void DrawEnemy( const Enemy* enemy, const Player* player ) {
 				DrawRectangle( ( int )( screenX - enemySize / 2 ),
 							   ( int )( GetScreenHeight() / 2 - enemySize / 2 ),
 							   ( int )enemySize, ( int )enemySize,
-							   ( Color ) {
-					255, 0, 0, 200
-				} );
+							   ( Color ) {255, 0, 0, 200} );
 			}
 		}
 	}
@@ -183,7 +181,7 @@ void LockMouseToCenter() {
 // Door collision helper.
 bool isPassable( int x, int y ) {
 	int tile = GetMapValue( &map, x, y );
-	return( tile == 0 || tile == 2 );
+	return( tile == 0 || (tile == 2 && map.doorTimers[y * MAP_WIDTH + x] > 0 ));
 }
 
 void ToggleDoor( Player* player, Map* m ) {
@@ -196,43 +194,34 @@ void ToggleDoor( Player* player, Map* m ) {
 	if( nx >= 0 && nx < m->width && ny >= 0 && ny < m->height ) {
 		int index = ny * m->width + nx;
 
-		// If it's a door, move it left or right
-		if( m->data[index] == 2 ) {
-			int moveX = ( cosf( player->angle ) > 0 ) ? 1 : -1;
-			int targetX = nx + moveX;
-
-			if( targetX >= 0 && targetX < m->width && GetMapValue( m, targetX, ny ) == 0 ) {
-				// Move door
-				m->data[index] = 0;
-				m->data[ny * m->width + targetX] = 2;
-				m->doorTimers[ny * m->width + targetX] = 3.0f; // Stay open for 3 seconds
-				m->doorOriginalX[ny * m->width + targetX] = nx; // Store original position
-				m->doorOriginalY[ny * m->width + targetX] = ny;
-			}
+		// If it's a door and not already in motion
+		if( m->data[index] == 2 && m->doorTimers[index] <= 0 ) {
+			m->doorTimers[index] = 3.0f;  // Stay open for 3 seconds
+			m->data[index] = -2; // Set door to "hidden" state (below floor)
 		}
 	}
 }
+
 
 void UpdateDoors( Map* m, float dt ) {
 	for( int y = 0; y < MAP_HEIGHT; y++ ) {
 		for( int x = 0; x < MAP_WIDTH; x++ ) {
 			int index = y * MAP_WIDTH + x;
+
 			if( m->doorTimers[index] > 0 ) {
 				m->doorTimers[index] -= dt;
-				if( map.doorTimers[index] <= 0 ) {
-					int originalX = map.doorOriginalX[index];
-					int originalY = map.doorOriginalY[index];
 
-					if( originalX >= 0 && originalY >= 0 && map.data[index] == 2 ) {
-						m->data[originalY * MAP_WIDTH + originalX] = 2;  // Move door back
-						m->data[index] = 0; // Clear moved position
-						m->doorTimers[index] = 0; // Reset timer
+				if( m->doorTimers[index] <= 0 ) {
+					// Reset door to original position after time expires
+					if( m->data[index] == -2 ) {
+						m->data[index] = 2; // Bring the door back
 					}
 				}
 			}
 		}
 	}
 }
+
 
 
 int main( void ) {
@@ -246,10 +235,12 @@ int main( void ) {
 	Texture2D wallTexture = LoadTexture( "mossy.png" );
 	SetTextureFilter( wallTexture, TEXTURE_FILTER_POINT );
 
+	//Texture2D hudTexture = LoadTexture( "hud.png" );
+
 	Player player = { 7.0f, 7.0f, 0.0f, PI / 3, 2.0f, 0.002f, 1.4f };
 	Enemy enemy = { 3.0f, 3.0f, 3.0f };
 
-
+	RenderTexture2D target = LoadRenderTexture( 800, 600 );
 
 	//=======================
 	// MAIN LOOP
@@ -284,7 +275,6 @@ int main( void ) {
 		if( IsKeyPressed( KEY_E ) ) {
 			ToggleDoor( &player, &map );
 		}
-		UpdateDoors( &map, dt );
 
 		// Handle Movement using WASD (strafe uses 0.7 multiplier).
 		float newX = player.x;
@@ -305,6 +295,18 @@ int main( void ) {
 
 		// Basic collision check: only update position if the destination cell is empty.
 		float collisionBuffer = 0.1f;
+		
+		// Check X movement
+		if( isPassable( ( int )( newX + collisionBuffer ), ( int )( player.y ) ) &&
+			isPassable( ( int )( newX - collisionBuffer ), ( int )( player.y ) ) ) {
+			player.x = newX;
+		}
+
+		// Check Y movement
+		if( isPassable( ( int )( player.x ), ( int )( newY + collisionBuffer ) ) &&
+			isPassable( ( int )( player.x ), ( int )( newY - collisionBuffer ) ) ) {
+			player.y = newY;
+		}
 
 		if( GetMapValue( &map, ( int )( newX + collisionBuffer ), ( int )( player.y ) ) == 0 &&
 			GetMapValue( &map, ( int )( newX - collisionBuffer ), ( int )( player.y ) ) == 0 ) {
@@ -327,28 +329,18 @@ int main( void ) {
 			player.x = newX;
 		}
 
-		// Check X movement
-		if( isPassable( ( int )( newX + collisionBuffer ), ( int )( player.y ) ) &&
-			isPassable( ( int )( newX - collisionBuffer ), ( int )( player.y ) ) ) {
-			player.x = newX;
-		}
-
-		// Check Y movement
-		if( isPassable( ( int )( player.x ), ( int )( newY + collisionBuffer ) ) &&
-			isPassable( ( int )( player.x ), ( int )( newY - collisionBuffer ) ) ) {
-			player.y = newY;
-		}
 
 		UpdateEnemy( &enemy, &player, &map, dt );
+		UpdateDoors( &map, dt );
 
-		BeginDrawing();
+		BeginTextureMode( target );
 		ClearBackground( BLACK );
 
 		// Draw Floor and Ceiling.
-		DrawRectangle( 0, screenHeight / 2, screenWidth, screenHeight / 2, DARKGRAY );
-		DrawRectangle( 0, 0, screenWidth, screenHeight / 2, BLACK );
+		DrawRectangle( 0, 300, 800, 300, DARKGRAY );
+		DrawRectangle( 0, 0, 800, 300, BLACK );
 
-		float columnWidth = ( float )screenWidth / NUM_RAYS;
+		float columnWidth = ( float )800 / NUM_RAYS;
 		for( int i = 0; i < NUM_RAYS; i++ ) {
 			// Calculate ray angle for this column.
 			float rayAngle = player.angle - ( player.fov / 2 ) + ( ( float )i / ( NUM_RAYS - 1 ) ) * player.fov;
@@ -357,7 +349,7 @@ int main( void ) {
 
 			// Correct the distance to reduce fisheye distortion.
 			float correctedDistance = distance * cosf( rayAngle - player.angle );
-			float projectedPlane = ( screenWidth / 2 ) / tanf( player.fov / 2 );
+			float projectedPlane = ( 800 / 2 ) / tanf( player.fov / 2 );
 			float wallHeight = projectedPlane / ( correctedDistance + 0.1f );
 
 			float fog = fmaxf( 0.0f, 1.0f - ( correctedDistance / 10.0f ) );
@@ -371,16 +363,46 @@ int main( void ) {
 
 
 			Rectangle srcRect = { ( float )texX, 0, 1, ( float )wallTexture.height };
-			Rectangle destRect = { i * columnWidth, ( screenHeight - wallHeight ) / 2, columnWidth, wallHeight };
+			Rectangle destRect = { i * columnWidth, ( 600 - wallHeight ) / 2, columnWidth, wallHeight };
 			DrawTexturePro( wallTexture, srcRect, destRect, ( Vector2 ) { 0, 0 }, 0.0f, shade );
 		}
 		DrawEnemy( &enemy, &player );
 
 		DrawFPS( 10, 10 );
+		EndTextureMode();
+
+		BeginDrawing();
+		ClearBackground( BLACK );
+
+		float		scale = fminf( ( float )screenWidth / 800, ( float )screenHeight / 600 );
+		float		offsetX = ( screenWidth - 800 * scale ) / 2;
+		float		offsetY = ( screenHeight - 600 * scale ) / 2;
+
+		DrawTexturePro( target.texture,
+						( Rectangle ){ 0, 0, ( float )target.texture.width, ( float ) - target.texture.height },
+						( Rectangle ){ offsetX, offsetY, 800 * scale, 600 * scale },
+						( Vector2 ){ 0, 0 }, 0.0f, WHITE );
+
+		// Draw Border textures
+		//if( offsetX > 0 ) {
+		//	 // Draw on the left black bar
+  //          DrawTexturePro( hudTexture,
+  //                          ( Rectangle ){ 0, 0, ( float )hudTexture.width, ( float )hudTexture.height },
+  //                          ( Rectangle ){ 0, 0, offsetX, ( float )screenHeight },
+  //                          ( Vector2 ){ 0, 0 }, 0.0f, WHITE );
+  //          // Draw on the right black bar
+  //          DrawTexturePro( hudTexture,
+  //                          ( Rectangle ){ 0, 0, ( float )hudTexture.width, ( float )hudTexture.height },
+  //                          ( Rectangle ){ screenWidth - offsetX, 0, offsetX, ( float )screenHeight },
+  //                          ( Vector2 ){ 0, 0 }, 0.0f, WHITE );
+  //      }
+
 		EndDrawing();
 	}
 
 	UnloadTexture( wallTexture );
+	//UnloadTexture( hudTexture );
+	UnloadRenderTexture( target );
 	CloseWindow();
 
 	return 0;
