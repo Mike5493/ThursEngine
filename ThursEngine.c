@@ -143,6 +143,23 @@ void UpdateEnemy( Enemy* enemy, const Player* player, Map* m, float dt ) {
 	}
 }
 
+void RenderFloorAndCeiling( Player* player ) {
+	int halfScreen = GetScreenHeight() / 2;
+
+	for( int y = 0; y < halfScreen; y++ ) {
+		float gradient = 1.0f - ( ( float )y / halfScreen ); // Fade effect
+		Color ceilingColor = ( Color ){ 70 * gradient, 70 * gradient, 70 * gradient, 255 }; // Blue Tint
+		DrawRectangle( 0, y, GetScreenWidth(), 1, ceilingColor );
+	}
+
+	for( int y = halfScreen; y < GetScreenHeight(); y++ ) {
+		float depth = ( ( float )( y - halfScreen ) / halfScreen ); // Simulate distance.
+		Color floorColor = ( Color ){ 50 * depth, 30 * depth, 20 * depth, 255 }; // Brown Tint.
+		DrawRectangle( 0, y, GetScreenWidth(), 1, floorColor );
+	}
+}
+
+
 // Draw Enemy to screen if it's within player's view.
 void DrawEnemy( const Enemy* enemy, const Player* player ) {
 	float		dx = enemy->x - player->x;
@@ -233,9 +250,11 @@ int main( void ) {
 
 	printf( "Current Working Directory: %s\n", GetWorkingDirectory() );
 	Texture2D wallTexture = LoadTexture( "mossy.png" );
+	//Texture2D hudTexture = LoadTexture( "hud.png" );
+	Texture2D floorTexture = LoadTexture( "floor.png" );
+	Texture2D ceilingTexture = LoadTexture( "ceiling.png" );
 	SetTextureFilter( wallTexture, TEXTURE_FILTER_POINT );
 
-	//Texture2D hudTexture = LoadTexture( "hud.png" );
 
 	Player player = { 7.0f, 7.0f, 0.0f, PI / 3, 2.0f, 0.002f, 1.4f };
 	Enemy enemy = { 3.0f, 3.0f, 3.0f };
@@ -335,10 +354,7 @@ int main( void ) {
 
 		BeginTextureMode( target );
 		ClearBackground( BLACK );
-
-		// Draw Floor and Ceiling.
-		DrawRectangle( 0, 300, 800, 300, DARKGRAY );
-		DrawRectangle( 0, 0, 800, 300, BLACK );
+		RenderFloorAndCeiling( &player );
 
 		float columnWidth = ( float )800 / NUM_RAYS;
 		for( int i = 0; i < NUM_RAYS; i++ ) {
@@ -402,6 +418,8 @@ int main( void ) {
 
 	UnloadTexture( wallTexture );
 	//UnloadTexture( hudTexture );
+	UnloadTexture( floorTexture );
+	UnloadTexture( ceilingTexture );
 	UnloadRenderTexture( target );
 	CloseWindow();
 
