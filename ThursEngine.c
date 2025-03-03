@@ -1,3 +1,17 @@
+/*
+*==========================================================================
+*                      **THURSENGINE**                                    *
+***************************************************************************
+* This is a raycasting engine made in pure c99, with Raylib for rendering *
+* and input.                                                              *
+* Thank you so much to Ben for the fix to the doors!                      *
+*                                                                         *
+* Author: Mikey                                                           *
+* Date: 02/24/2025                                                        *
+*                                                                         *
+*==========================================================================
+*/
+
 #include <raylib.h>
 #include <math.h>
 #include <stdio.h>
@@ -6,7 +20,11 @@
 #define MAP_WIDTH		16
 #define MAP_HEIGHT		16
 #define NUM_RAYS		120
+
 #define TEXTURE_WIDTH	64
+#define SCREEN_H		800
+#define SCREEN_W		600
+
 #define PI	3.14159265358979323846f
 
 typedef struct {
@@ -143,23 +161,6 @@ void UpdateEnemy( Enemy* enemy, const Player* player, Map* m, float dt ) {
 	}
 }
 
-void RenderFloorAndCeiling( Player* player ) {
-	int halfScreen = GetScreenHeight() / 2;
-
-	for( int y = 0; y < halfScreen; y++ ) {
-		float gradient = 1.0f - ( ( float )y / halfScreen ); // Fade effect
-		Color ceilingColor = ( Color ){ 70 * gradient, 70 * gradient, 70 * gradient, 255 }; // Blue Tint
-		DrawRectangle( 0, y, GetScreenWidth(), 1, ceilingColor );
-	}
-
-	for( int y = halfScreen; y < GetScreenHeight(); y++ ) {
-		float depth = ( ( float )( y - halfScreen ) / halfScreen ); // Simulate distance.
-		Color floorColor = ( Color ){ 50 * depth, 30 * depth, 20 * depth, 255 }; // Brown Tint.
-		DrawRectangle( 0, y, GetScreenWidth(), 1, floorColor );
-	}
-}
-
-
 // Draw Enemy to screen if it's within player's view.
 void DrawEnemy( const Enemy* enemy, const Player* player ) {
 	float		dx = enemy->x - player->x;
@@ -198,7 +199,7 @@ void LockMouseToCenter() {
 // Door collision helper.
 bool isPassable( int x, int y ) {
 	int tile = GetMapValue( &map, x, y );
-	return( tile == 0 || (tile == 2 && map.doorTimers[y * MAP_WIDTH + x] > 0 ));
+	return( tile == 0 || ( tile == 2 && map.doorTimers[y * MAP_WIDTH + x] > 0 ) );
 }
 
 void ToggleDoor( Player* player, Map* m ) {
@@ -214,7 +215,7 @@ void ToggleDoor( Player* player, Map* m ) {
 		// If it's a door and not already in motion
 		if( m->data[index] == 2 && m->doorTimers[index] <= 0 ) {
 			m->doorTimers[index] = 3.0f;  // Stay open for 3 seconds
-			m->data[index] = -2; // Set door to "hidden" state (below floor)
+			m->data[index] = 0; // Set door to "hidden" state (below floor)
 		}
 	}
 }
@@ -230,7 +231,7 @@ void UpdateDoors( Map* m, float dt ) {
 
 				if( m->doorTimers[index] <= 0 ) {
 					// Reset door to original position after time expires
-					if( m->data[index] == -2 ) {
+					if( m->data[index] == 0 ) {
 						m->data[index] = 2; // Bring the door back
 					}
 				}
@@ -238,8 +239,6 @@ void UpdateDoors( Map* m, float dt ) {
 		}
 	}
 }
-
-
 
 int main( void ) {
 	SetConfigFlags( FLAG_WINDOW_RESIZABLE );
@@ -251,8 +250,8 @@ int main( void ) {
 	printf( "Current Working Directory: %s\n", GetWorkingDirectory() );
 	Texture2D wallTexture = LoadTexture( "mossy.png" );
 	//Texture2D hudTexture = LoadTexture( "hud.png" );
-	Texture2D floorTexture = LoadTexture( "floor.png" );
-	Texture2D ceilingTexture = LoadTexture( "ceiling.png" );
+	//Texture2D floorTexture = LoadTexture( "floor.png" );
+	//Texture2D ceilingTexture = LoadTexture( "ceiling.png" );
 	SetTextureFilter( wallTexture, TEXTURE_FILTER_POINT );
 
 
@@ -314,7 +313,7 @@ int main( void ) {
 
 		// Basic collision check: only update position if the destination cell is empty.
 		float collisionBuffer = 0.1f;
-		
+
 		// Check X movement
 		if( isPassable( ( int )( newX + collisionBuffer ), ( int )( player.y ) ) &&
 			isPassable( ( int )( newX - collisionBuffer ), ( int )( player.y ) ) ) {
@@ -349,12 +348,18 @@ int main( void ) {
 		}
 
 
-		UpdateEnemy( &enemy, &player, &map, dt );
 		UpdateDoors( &map, dt );
+		UpdateEnemy( &enemy, &player, &map, dt );
 
 		BeginTextureMode( target );
 		ClearBackground( BLACK );
-		RenderFloorAndCeiling( &player );
+		
+
+		for( int i = GetScreenHeight() / 2; i < GetScreenHeight(); i += 2 ) {
+			int intensity = 40 + ( ( i - GetScreenHeight() / 2 ) / 2 );
+			DrawRectangle( 0, 0, GetScreenWidth(), GetScreenHeight() / 2, (Color){ intensity, intensity, intensity, 150});  // Ceiling
+		}
+		DrawRectangle( 0, GetScreenHeight() / 2, GetScreenWidth(), GetScreenHeight() / 2, ( Color ){ 60, 40, 20, 100});  // Floor
 
 		float columnWidth = ( float )800 / NUM_RAYS;
 		for( int i = 0; i < NUM_RAYS; i++ ) {
@@ -377,10 +382,10 @@ int main( void ) {
 				shade = ( Color ){ 150, 75, 0, 255 };
 			}
 
-
 			Rectangle srcRect = { ( float )texX, 0, 1, ( float )wallTexture.height };
 			Rectangle destRect = { i * columnWidth, ( 600 - wallHeight ) / 2, columnWidth, wallHeight };
 			DrawTexturePro( wallTexture, srcRect, destRect, ( Vector2 ) { 0, 0 }, 0.0f, shade );
+
 		}
 		DrawEnemy( &enemy, &player );
 
@@ -390,14 +395,15 @@ int main( void ) {
 		BeginDrawing();
 		ClearBackground( BLACK );
 
+
 		float		scale = fminf( ( float )screenWidth / 800, ( float )screenHeight / 600 );
 		float		offsetX = ( screenWidth - 800 * scale ) / 2;
 		float		offsetY = ( screenHeight - 600 * scale ) / 2;
 
 		DrawTexturePro( target.texture,
-						( Rectangle ){ 0, 0, ( float )target.texture.width, ( float ) - target.texture.height },
-						( Rectangle ){ offsetX, offsetY, 800 * scale, 600 * scale },
-						( Vector2 ){ 0, 0 }, 0.0f, WHITE );
+						( Rectangle ) {0, 0, ( float )target.texture.width, ( float )-target.texture.height},
+						( Rectangle ) {offsetX, offsetY, 800 * scale, 600 * scale},
+						( Vector2 ) {0, 0}, 0.0f, WHITE );
 
 		// Draw Border textures
 		//if( offsetX > 0 ) {
@@ -418,8 +424,8 @@ int main( void ) {
 
 	UnloadTexture( wallTexture );
 	//UnloadTexture( hudTexture );
-	UnloadTexture( floorTexture );
-	UnloadTexture( ceilingTexture );
+	//UnloadTexture( floorTexture );
+	//UnloadTexture( ceilingTexture );
 	UnloadRenderTexture( target );
 	CloseWindow();
 
