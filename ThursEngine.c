@@ -26,6 +26,7 @@
 #define SCREEN_W		600
 
 #define PI	3.14159265358979323846f
+#define CLAMP(value, min, max) ((value) < (min) ? (min) : ((value) > (max) ? (max) : (value)))
 
 typedef struct {
 	float		x, y;
@@ -42,6 +43,7 @@ typedef struct {
 	float		speed;
 } Enemy;
 
+typedef enum{ CLOSED, OPENING, OPEN, CLOSING } DoorState;
 typedef struct {
 	int			width;
 	int			height;
@@ -49,6 +51,8 @@ typedef struct {
 	float		doorTimers[MAP_WIDTH * MAP_HEIGHT];
 	int			doorOriginalX[MAP_WIDTH * MAP_HEIGHT];
 	int			doorOriginalY[MAP_WIDTH * MAP_HEIGHT];
+	float		doorOpenness[MAP_WIDTH * MAP_HEIGHT];
+	DoorState	doorStates[MAP_WIDTH * MAP_HEIGHT];
 } Map;
 
 Map map = {
@@ -56,17 +60,20 @@ Map map = {
 	.height = MAP_HEIGHT,
 	.data = {
 		1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-		1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1,
-		1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1,
-		1, 0, 1, 0, 1, 1, 2, 1, 1, 1, 2, 1, 0, 0, 0, 1,
-		1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1,
-		1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1,
+		1, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1,
+		1, 0, 1, 1, 1, 0, 2, 0, 0, 1, 0, 1, 1, 1, 0, 1,
+		1, 0, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 1,
+		1, 0, 0, 0, 2, 0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 1,
+		1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1,
+		1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1,
 		1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
-		1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
-		1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 1, 1,
-		1, 0, 0, 0, 0, 1, 2, 1, 1, 1, 1, 0, 1, 0, 0, 1,
-		1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1,
-		1, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1,
+		1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1,
+		1, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1,
+		1, 0, 1, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 1,
+		1, 0, 1, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 1,
+		1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1,
+		1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 1,
+		1, 0, 0, 0, 0, 2, 0, 1, 1, 1, 0, 0, 0, 0, 0, 1,
 		1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1
 	}
 };
@@ -117,7 +124,7 @@ float CastRay( const Player* player, Map* m, float angle, int* side, int* texX, 
 		}
 
 		int tile = GetMapValue( m, mapX, mapY );
-		if( tile == 1 || tile == 2 ) {
+		if( tile == 1 || (tile == 2 && m->doorOpenness[mapY * m->width + mapX] < 0.5f ) ) {
 			hit = true;
 			if( tile == 2 ) {
 				*hitType = 2; // Door hit
@@ -199,23 +206,47 @@ void LockMouseToCenter() {
 // Door collision helper.
 bool isPassable( int x, int y ) {
 	int tile = GetMapValue( &map, x, y );
-	return( tile == 0 || ( tile == 2 && map.doorTimers[y * MAP_WIDTH + x] > 0 ) );
+	if( tile == 2 ) {
+		int index = y * map.width + x;
+		return map.doorOpenness[index] > 0.5f; // Passable when more than half open
+	}
+	return tile == 0;
 }
 
 void ToggleDoor( Player* player, Map* m ) {
 	int px = ( int )player->x;
 	int py = ( int )player->y;
 
-	int nx = ( int )( px + cosf( player->angle ) + 0.5f );
-	int ny = ( int )( py + sinf( player->angle ) + 0.5f );
+	//printf( "Player at %d,%d trying to toggle door\n", px, py );
 
-	if( nx >= 0 && nx < m->width && ny >= 0 && ny < m->height ) {
-		int index = ny * m->width + nx;
+	int minDist = MAP_WIDTH + MAP_HEIGHT; // Large initial distance
+	int targetX = -1, targetY = -1;
 
-		// If it's a door and not already in motion
-		if( m->data[index] == 2 && m->doorTimers[index] <= 0 ) {
-			m->doorTimers[index] = 3.0f;  // Stay open for 3 seconds
-			m->data[index] = 0; // Set door to "hidden" state (below floor)
+	// Check 3x3 area around player
+	for( int dy = -1; dy <= 1; dy++ ) {
+		for( int dx = -1; dx <= 1; dx++ ) {
+			int nx = px + dx;
+			int ny = py + dy;
+			if( nx >= 0 && nx < m->width && ny >= 0 && ny < m->height ) {
+				int index = ny * m->width + nx;
+				if( m->data[index] == 2 ) {
+					int dist = abs( dx ) + abs( dy ); // Manhattan distance
+					if( dist < minDist ) {
+						minDist = dist;
+						targetX = nx;
+						targetY = ny;
+					}
+				}
+			}
+		}
+	}
+
+	if( targetX != -1 && targetY != -1 ) {
+		int index = targetY * m->width + targetX;
+		if( m->doorStates[index] == CLOSED || m->doorStates[index] == CLOSING ) {
+			m->doorTimers[index] = 3.0f; // Total cycle: 1s open, 1s wait, 1s close
+			m->doorStates[index] = OPENING;
+			//printf( "Door toggled open at %d,%d, timer set to %f\n", targetX, targetY, m->doorTimers[index] );
 		}
 	}
 }
@@ -225,19 +256,52 @@ void UpdateDoors( Map* m, float dt ) {
 	for( int y = 0; y < MAP_HEIGHT; y++ ) {
 		for( int x = 0; x < MAP_WIDTH; x++ ) {
 			int index = y * MAP_WIDTH + x;
-
-			if( m->doorTimers[index] > 0 ) {
+			if( m->data[index] == 2 && m->doorTimers[index] > 0 ) { // Only check doors with active timers
 				m->doorTimers[index] -= dt;
+				if( m->doorTimers[index] < 0.0f ) m->doorTimers[index] = 0.0f; // Prevent negative timer
 
-				if( m->doorTimers[index] <= 0 ) {
-					// Reset door to original position after time expires
-					if( m->data[index] == 0 ) {
-						m->data[index] = 2; // Bring the door back
-					}
+				switch( m->doorStates[index] ) {
+					case OPENING:
+						if( m->doorTimers[index] > 2.0f ) {
+							m->doorOpenness[index] += dt / 1.0f;
+							if( m->doorOpenness[index] > 1.0f ) m->doorOpenness[index] = 1.0f;
+						} else {
+							m->doorStates[index] = OPEN;
+						}
+						break;
+					case OPEN:
+						if( m->doorTimers[index] <= 1.0f ) {
+							m->doorStates[index] = CLOSING;
+						}
+						break;
+					case CLOSING:
+						if( m->doorOpenness[index] > 0.0f ) {
+							m->doorOpenness[index] -= dt / 1.0f;
+							if( m->doorOpenness[index] < 0.0f ) m->doorOpenness[index] = 0.0f;
+						} else {
+							m->doorStates[index] = CLOSED;
+							m->data[index] = 2;
+							m->doorTimers[index] = 0.0f;
+							//printf( "Door %d,%d closed\n", x, y ); // Debug only on close
+						}
+						break;
+					case CLOSED:
+						break;
 				}
+				//printf( "Door %d,%d openness: %f, timer: %f, state: %d\n", x, y, m->doorOpenness[index], m->doorTimers[index], m->doorStates[index] ); // Debug only active doors
 			}
 		}
 	}
+}
+
+// Dithering Formula for textured floor
+unsigned int hash( unsigned int x, unsigned int y ) {
+	x = ( x ^ 61 ) ^ ( y >> 16 );
+	x = x + ( x << 3 );
+	x = x ^ ( x >> 4 );
+	x = x * 0x27d4eb2d;
+	x = x ^ ( x >> 15 );
+	return x;
 }
 
 int main( void ) {
@@ -255,10 +319,27 @@ int main( void ) {
 	SetTextureFilter( wallTexture, TEXTURE_FILTER_POINT );
 
 
-	Player player = { 7.0f, 7.0f, 0.0f, PI / 3, 2.0f, 0.002f, 1.4f };
+	Player player = { 7.5f, 7.5f, 0.0f, PI / 3, 2.0f, 0.002f, 1.4f };
 	Enemy enemy = { 3.0f, 3.0f, 3.0f };
 
 	RenderTexture2D target = LoadRenderTexture( 800, 600 );
+
+	while( !isPassable( ( int )player.x, ( int )player.y ) ) {
+		player.x += 0.1f;
+		if( player.x >= MAP_WIDTH ) {
+			player.x = 0.1f;
+			player.y = 0.1f;
+		}
+		if( player.y >= MAP_HEIGHT ) break;
+	}
+
+	for( int y = 0; y < MAP_HEIGHT; y++ ) {
+		for( int x = 0; x < MAP_WIDTH; x++ ) {
+			int index = y * MAP_WIDTH + x;
+			map.doorOpenness[index] = 0.0f;
+			map.doorStates[index] = CLOSED;
+		}
+	}
 
 	//=======================
 	// MAIN LOOP
@@ -311,40 +392,54 @@ int main( void ) {
 		player.angle += turnRight - turnLeft;
 
 
-		// Basic collision check: only update position if the destination cell is empty.
-		float collisionBuffer = 0.1f;
+		// Collision check with larger buffer and diagonal collision check
+		float collisionBuffer = 0.1;
+		int			newCellX = ( int )newX;
+		int			newCellY = ( int )newY;
+		int			currCellX = ( int )player.x;
+		int			currCellY = ( int )player.y;
 
-		// Check X movement
-		if( isPassable( ( int )( newX + collisionBuffer ), ( int )( player.y ) ) &&
-			isPassable( ( int )( newX - collisionBuffer ), ( int )( player.y ) ) ) {
-			player.x = newX;
-		}
+		// Original X-axis check with diagonal corners
+		bool xPassable = isPassable( ( int )( newX + collisionBuffer ), ( int )player.y ) &&
+						 isPassable( ( int )( newX - collisionBuffer ), ( int )player.y ) &&
+						 isPassable( ( int )( newX + collisionBuffer ), ( int )( player.y + collisionBuffer ) ) && // Top-right
+						 isPassable( ( int )( newX + collisionBuffer ), ( int )( player.y - collisionBuffer ) ) && // Bottom-right
+						 isPassable( ( int )( newX - collisionBuffer ), ( int )( player.y + collisionBuffer ) ) && // Top-left
+						 isPassable( ( int )( newX - collisionBuffer ), ( int )( player.y - collisionBuffer ) );   // Bottom-left
 
-		// Check Y movement
-		if( isPassable( ( int )( player.x ), ( int )( newY + collisionBuffer ) ) &&
-			isPassable( ( int )( player.x ), ( int )( newY - collisionBuffer ) ) ) {
-			player.y = newY;
-		}
+		// Original Y-axis check with diagonal corners
+		bool yPassable = isPassable( ( int )player.x, ( int )( newY + collisionBuffer ) ) &&
+						 isPassable( ( int )player.x, ( int )( newY - collisionBuffer ) ) &&
+						 isPassable( ( int )( player.x + collisionBuffer ), ( int )( newY + collisionBuffer ) ) && // Top-right
+						 isPassable( ( int )( player.x - collisionBuffer ), ( int )( newY + collisionBuffer ) ) && // Top-left
+						 isPassable( ( int )( player.x + collisionBuffer ), ( int )( newY - collisionBuffer ) ) && // Bottom-right
+						 isPassable( ( int )( player.x - collisionBuffer ), ( int )( newY - collisionBuffer ) );   // Bottom-left
 
-		if( GetMapValue( &map, ( int )( newX + collisionBuffer ), ( int )( player.y ) ) == 0 &&
-			GetMapValue( &map, ( int )( newX - collisionBuffer ), ( int )( player.y ) ) == 0 ) {
-			player.x = newX;
-		}
+		if( xPassable ) player.x = newX;
+		if( yPassable ) player.y = newY;
 
-		else if( GetMapValue( &map, ( int )( player.x ), ( int )( newY + collisionBuffer ) ) == 0 &&
-				 GetMapValue( &map, ( int )( player.x ), ( int )( newY - collisionBuffer ) ) == 0 ) {
-			player.y = newY;
-		}
-
-		// Check for vertical movement (Y-Axis)
-		if( GetMapValue( &map, ( int )( player.x ), ( int )( newY + collisionBuffer ) ) == 0 &&
-			GetMapValue( &map, ( int )( player.x ), ( int )( newY - collisionBuffer ) ) == 0 ) {
-			player.y = newY;
-		}
-		// Allow sliding on X-Axis if Y movement is blocked
-		else if( GetMapValue( &map, ( int )( newX + collisionBuffer ), ( int )( player.y ) ) == 0 &&
-				 GetMapValue( &map, ( int )( newX - collisionBuffer ), ( int )( player.y ) ) == 0 ) {
-			player.x = newX;
+		// Fallback sliding logic with diagonal awareness
+		if( !xPassable && !yPassable ) {
+			// Try sliding along X if Y is blocked
+			if( isPassable( newCellX, currCellY ) &&
+				isPassable( newCellX + collisionBuffer, currCellY ) &&
+				isPassable( newCellX - collisionBuffer, currCellY ) &&
+				isPassable( newCellX + collisionBuffer, currCellY + collisionBuffer ) &&
+				isPassable( newCellX + collisionBuffer, currCellY - collisionBuffer ) &&
+				isPassable( newCellX - collisionBuffer, currCellY + collisionBuffer ) &&
+				isPassable( newCellX - collisionBuffer, currCellY - collisionBuffer ) ) {
+				player.x = newX;
+			}
+			// Try sliding along Y if X is blocked
+			else if( isPassable( currCellX, newCellY ) &&
+					 isPassable( currCellX, newCellY + collisionBuffer ) &&
+					 isPassable( currCellX, newCellY - collisionBuffer ) &&
+					 isPassable( currCellX + collisionBuffer, newCellY + collisionBuffer ) &&
+					 isPassable( currCellX - collisionBuffer, newCellY + collisionBuffer ) &&
+					 isPassable( currCellX + collisionBuffer, newCellY - collisionBuffer ) &&
+					 isPassable( currCellX - collisionBuffer, newCellY - collisionBuffer ) ) {
+				player.y = newY;
+			}
 		}
 
 
@@ -353,13 +448,32 @@ int main( void ) {
 
 		BeginTextureMode( target );
 		ClearBackground( BLACK );
-		
 
-		for( int i = GetScreenHeight() / 2; i < GetScreenHeight(); i += 2 ) {
-			int intensity = 40 + ( ( i - GetScreenHeight() / 2 ) / 2 );
-			DrawRectangle( 0, 0, GetScreenWidth(), GetScreenHeight() / 2, (Color){ intensity, intensity, intensity, 150});  // Ceiling
+		for( int i = 0; i < screenHeight / 2; i += 4 ) {
+			int shade = 20 + ( i / 4 ) * 2;
+			DrawRectangle( 0, i, screenWidth, 4, ( Color ) { shade, shade, shade, 100 } );  // Ceiling
 		}
-		DrawRectangle( 0, GetScreenHeight() / 2, GetScreenWidth(), GetScreenHeight() / 2, ( Color ){ 60, 40, 20, 100});  // Floor
+
+		for( int i = screenHeight / 2; i < screenHeight; i += 4 ) {
+			int baseShade = 90 + ( ( i - screenHeight / 2 ) / 4 ) * 3;
+			for( int j = 0; j < 4; j++ ) {
+				int yOffset = i + j;
+				if( yOffset >= screenHeight ) break;
+				// Dithering procedure
+				int blockX = (yOffset * screenWidth) / 4;
+				int blockY = yOffset / 4;
+				int noise = ( hash( ( unsigned int )( blockX + blockY ), 0 ) % 10 ) - 5;
+				int shade = baseShade + noise;
+				Color floorColor = {
+					( unsigned char )CLAMP( shade - 10, 0, 255 ),
+					( unsigned char )CLAMP( shade - 15, 0, 255 ),
+					( unsigned char )CLAMP( shade - 20, 0, 255 ),
+					80
+				};
+				DrawRectangle( 0, yOffset, screenWidth, 1, floorColor );
+			}
+		}
+
 
 		float columnWidth = ( float )800 / NUM_RAYS;
 		for( int i = 0; i < NUM_RAYS; i++ ) {
@@ -396,14 +510,22 @@ int main( void ) {
 		ClearBackground( BLACK );
 
 
-		float		scale = fminf( ( float )screenWidth / 800, ( float )screenHeight / 600 );
-		float		offsetX = ( screenWidth - 800 * scale ) / 2;
-		float		offsetY = ( screenHeight - 600 * scale ) / 2;
+		float scale = fminf( ( float )screenWidth / 800, ( float )screenHeight / 600 );
+		float offsetX = ( screenWidth - 800 * scale ) / 2;
+		float offsetY = ( screenHeight - 600 * scale ) / 2;
 
 		DrawTexturePro( target.texture,
-						( Rectangle ) {0, 0, ( float )target.texture.width, ( float )-target.texture.height},
-						( Rectangle ) {offsetX, offsetY, 800 * scale, 600 * scale},
-						( Vector2 ) {0, 0}, 0.0f, WHITE );
+						( Rectangle ) {
+			0, 0, ( float )target.texture.width, ( float )-target.texture.height
+		},
+						( Rectangle ) {
+			offsetX, offsetY, 800 * scale, 600 * scale
+		},  // Proper scaling
+						( Vector2 ) {
+			0, 0
+		}, 0.0f, WHITE );
+
+
 
 		// Draw Border textures
 		//if( offsetX > 0 ) {
