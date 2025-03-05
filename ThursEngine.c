@@ -17,13 +17,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define MAP_WIDTH		16
-#define MAP_HEIGHT		16
-#define NUM_RAYS		120
+#define MAP_WIDTH		 16
+#define MAP_HEIGHT		 16
+#define NUM_RAYS		 160
 
-#define TEXTURE_WIDTH	64
+#define TEXTURE_WIDTH	 64
 #define SCREEN_H		800
 #define SCREEN_W		600
+
+#define NUM_ENTITIES	  6
 
 #define PI	3.14159265358979323846f
 #define CLAMP(value, min, max) ((value) < (min) ? (min) : ((value) > (max) ? (max) : (value)))
@@ -41,7 +43,10 @@ typedef struct {
 typedef struct {
 	float		x, y;
 	float		speed;
-} Enemy;
+	Color		color;
+	int			behavior;		// 0 = chase, 1 = wander, 2 = stationary
+} Entity;
+Entity entities[NUM_ENTITIES];
 
 typedef enum{ CLOSED, OPENING, OPEN, CLOSING } DoorState;
 typedef struct {
@@ -58,25 +63,35 @@ typedef struct {
 Map map = {
 	.width = MAP_WIDTH,
 	.height = MAP_HEIGHT,
-	.data = {
+	.data = {											
 		1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-		1, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1,
-		1, 0, 1, 1, 1, 0, 2, 0, 0, 1, 0, 1, 1, 1, 0, 1,
-		1, 0, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 1,
-		1, 0, 0, 0, 2, 0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 1,
-		1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1,
-		1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1,
+		1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 
+		1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1,
+		1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1,
 		1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
-		1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1,
-		1, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1,
-		1, 0, 1, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 1,
-		1, 0, 1, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 1,
-		1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1,
-		1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 1,
-		1, 0, 0, 0, 0, 2, 0, 1, 1, 1, 0, 0, 0, 0, 0, 1,
-		1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1
+		1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 2, 1, 1,
+		1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+		1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+		1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+		1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+		1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1,
+		1, 0, 0, 1, 0, 1, 1, 2, 1, 1, 0, 0, 1, 0, 0, 1,
+		1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 2, 0, 0, 1,
+		1, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1,
+		1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1,
+		1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 1
 	}
 };
+
+// Door collision helper.
+bool isPassable( int x, int y ) {
+	int tile = GetMapValue( &map, x, y );
+	if( tile == 2 ) {
+		int index = y * map.width + x;
+		return map.doorOpenness[index] > 0.5f; // Passable when more than half open
+	}
+	return tile == 0;
+}
 
 // Helper to fetch the map cell value (with bounds check).
 int GetMapValue( Map* m, int x, int y ) {
@@ -100,15 +115,15 @@ float CastRay( const Player* player, Map* m, float angle, int* side, int* texX, 
 	int			stepX = ( cosA < 0 ) ? -1 : 1;
 	int			stepY = ( sinA < 0 ) ? -1 : 1;
 
-	float sideDistX = ( cosA < 0 ) ? ( player->x - mapX ) * deltaDistX : ( mapX + 1.0f - player->x ) * deltaDistX;
-	float sideDistY = ( sinA < 0 ) ? ( player->y - mapY ) * deltaDistY : ( mapY + 1.0f - player->y ) * deltaDistY;
+	float		sideDistX = ( cosA < 0 ) ? ( player->x - mapX ) * deltaDistX : ( mapX + 1.0f - player->x ) * deltaDistX;
+	float		sideDistY = ( sinA < 0 ) ? ( player->y - mapY ) * deltaDistY : ( mapY + 1.0f - player->y ) * deltaDistY;
 
 	float		distance = 0.0f;
 	bool		hit = false;
 
 	*hitType = 0; // Default: No special hit
 
-	Color shade = ( Color ){ 255, 255, 255, 255 };
+	//Color shade = ( Color ){ 255, 255, 255, 255 };
 
 	while( !hit && distance < 16.0f ) {
 		if( sideDistX < sideDistY ) {
@@ -122,6 +137,7 @@ float CastRay( const Player* player, Map* m, float angle, int* side, int* texX, 
 			*side = 1;
 			distance = sideDistY - deltaDistY;
 		}
+
 
 		int tile = GetMapValue( m, mapX, mapY );
 		if( tile == 1 || (tile == 2 && m->doorOpenness[mapY * m->width + mapX] < 0.5f ) ) {
@@ -140,7 +156,8 @@ float CastRay( const Player* player, Map* m, float angle, int* side, int* texX, 
 		wallHit = player->x + distance * cosA;
 	}
 	wallHit -= floorf( wallHit );
-	*texX = ( int )( wallHit * TEXTURE_WIDTH );
+	*texX = ( int )roundf( wallHit * TEXTURE_WIDTH );
+
 	if( *texX < 0 ) {
 		*texX = 0;
 	}
@@ -150,50 +167,85 @@ float CastRay( const Player* player, Map* m, float angle, int* side, int* texX, 
 }
 
 // Update enemy by moving it toward player, if not too close.
-void UpdateEnemy( Enemy* enemy, const Player* player, Map* m, float dt ) {
-	float		dx = player->x - enemy->x;
-	float		dy = player->y - enemy->y;
-	float		distance = sqrtf( dx * dx + dy * dy );
+void UpdateEntities( Entity* entities, int count, const Player* player, Map* m, float dt ) {
+	for( int i = 0; i < count; i++ ) {
+		float newX = entities[i].x;
+		float newY = entities[i].y;
 
-	if( distance > 0.5f ) {
-		float moveX = ( dx / distance ) * enemy->speed * dt;
-		float moveY = ( dy / distance ) * enemy->speed * dt;
-
-		if( GetMapValue( m, ( int )( enemy->x + moveX ), ( int )( enemy->y ) ) == 0 ) {
-			enemy->x += moveX;
+		switch( entities[i].behavior ) {
+			case 0: // Chase player
+			{
+				float dx = player->x - entities[i].x;
+				float dy = player->y - entities[i].y;
+				float distance = sqrtf( dx * dx + dy * dy );
+				if( distance > 0.5f ) {
+					newX += ( dx / distance ) * entities[i].speed * dt;
+					newY += ( dy / distance ) * entities[i].speed * dt;
+				}
+			}
+			break;
+			case 1: // Wander randomly
+			{
+				static float wanderTimer = 0.0f;
+				wanderTimer += dt;
+				if( wanderTimer > 1.0f ) {
+					newX += ( ( float )rand() / RAND_MAX - 0.5f ) * entities[i].speed * dt * 2.0f;
+					newY += ( ( float )rand() / RAND_MAX - 0.5f ) * entities[i].speed * dt * 2.0f;
+					wanderTimer = 0.0f;
+				}
+			}
+			break;
+			case 2: // Stationary
+				break;
 		}
-		if( GetMapValue( m, ( int )( enemy->x ), ( int )( enemy->y + moveY ) ) == 0 ) {
-			enemy->y += moveY;
+
+		// Collision check
+		int newCellX = ( int )newX;
+		int newCellY = ( int )newY;
+		if( isPassable( newCellX, newCellY ) ) {
+			entities[i].x = newX;
+			entities[i].y = newY;
+		} else {
+			// Simple slide (keep original position if blocked)
+			entities[i].x = entities[i].x;
+			entities[i].y = entities[i].y;
 		}
 	}
 }
 
 // Draw Enemy to screen if it's within player's view.
-void DrawEnemy( const Enemy* enemy, const Player* player ) {
-	float		dx = enemy->x - player->x;
-	float		dy = enemy->y - player->y;
-	float		distance = sqrtf( dx * dx + dy * dy );
+void DrawEntities( Entity* entities, int count, const Player* player, Map* m ) {
+	for( int i = 0; i < count; i++ ) {
+		float dx = entities[i].x - player->x;
+		float dy = entities[i].y - player->y;
+		float distance = sqrtf( dx * dx + dy * dy );
 
-	if( distance > 0.2f && distance < 16.0f ) {
-		float enemyAngle = atan2f( dy, dx ) - player->angle;
+		if( distance > 0.2f && distance < 16.0f ) {
+			float entityAngle = atan2f( dy, dx ) - player->angle;
+			if( entityAngle < -PI ) entityAngle += 2 * PI;
+			if( entityAngle > PI ) entityAngle -= 2 * PI;
 
-		// Normalize angle between -PI and PI.
-		if( enemyAngle < -PI ) {
-			enemyAngle += 2 * PI;
-		}
-		if( enemyAngle > PI ) {
-			enemyAngle -= 2 * PI;
-		}
+			if( fabsf( entityAngle ) < player->fov / 2 ) {
+				// Use CastRay to check occlusion
+				int side, texX, hitType;
+				float occlusionDistance = CastRay( player, m, entityAngle + player->angle, &side, &texX, &hitType );
 
-		if( fabsf( enemyAngle ) < player->fov / 2 ) {
-			float screenX = GetScreenWidth() / 2 + tanf( enemyAngle ) * ( 500.0f / distance );
-			float enemySize = fmaxf( 20.0f, fminf( 100.0f, 500.0f / distance ) );
+				// If the ray hits a wall before the entity, it's occluded
+				bool occluded = ( occlusionDistance <= distance && occlusionDistance < 16.0f );
 
-			if( screenX + enemySize > 0 && screenX - enemySize < GetScreenWidth() ) {
-				DrawRectangle( ( int )( screenX - enemySize / 2 ),
-							   ( int )( GetScreenHeight() / 2 - enemySize / 2 ),
-							   ( int )enemySize, ( int )enemySize,
-							   ( Color ) {255, 0, 0, 200} );
+				if( !occluded ) {
+					float screenX = GetScreenWidth() / 2 + tanf( entityAngle ) * ( 500.0f / distance );
+					int entitySize = ( int )fmaxf( 20.0f, fminf( 100.0f, 500.0f / distance ) ); // Revert to truncation for now
+
+					if( screenX + entitySize > 0 && screenX - entitySize < GetScreenWidth() ) {
+						DrawRectangle( ( int )( screenX - entitySize / 2 ), // Revert to truncation
+									   ( int )( GetScreenHeight() / 2 - entitySize / 2 ),
+									   entitySize, entitySize,
+									   entities[i].color );
+						// Debug: Confirm drawing
+						//printf("Drawing entity %d at %.1f,%.1f, distance: %.1f, occluded: %d\n", i, entities[i].x, entities[i].y, distance, occluded);
+					}
+				}
 			}
 		}
 	}
@@ -203,15 +255,6 @@ void LockMouseToCenter() {
 	SetMousePosition( GetScreenWidth() / 2, GetScreenHeight() / 2 );
 }
 
-// Door collision helper.
-bool isPassable( int x, int y ) {
-	int tile = GetMapValue( &map, x, y );
-	if( tile == 2 ) {
-		int index = y * map.width + x;
-		return map.doorOpenness[index] > 0.5f; // Passable when more than half open
-	}
-	return tile == 0;
-}
 
 void ToggleDoor( Player* player, Map* m ) {
 	int px = ( int )player->x;
@@ -294,7 +337,7 @@ void UpdateDoors( Map* m, float dt ) {
 	}
 }
 
-// Dithering Formula for textured floor
+// Dithering Formula for textured floor using bit shifting.
 unsigned int hash( unsigned int x, unsigned int y ) {
 	x = ( x ^ 61 ) ^ ( y >> 16 );
 	x = x + ( x << 3 );
@@ -319,11 +362,7 @@ int main( void ) {
 	SetTextureFilter( wallTexture, TEXTURE_FILTER_POINT );
 
 
-	Player player = { 7.5f, 7.5f, 0.0f, PI / 3, 2.0f, 0.002f, 1.4f };
-	Enemy enemy = { 3.0f, 3.0f, 3.0f };
-
-	RenderTexture2D target = LoadRenderTexture( 800, 600 );
-
+	Player player = { 10.0f, 10.0f, 0.0f, PI / 3, 2.0f, 0.002f, 1.4f };
 	while( !isPassable( ( int )player.x, ( int )player.y ) ) {
 		player.x += 0.1f;
 		if( player.x >= MAP_WIDTH ) {
@@ -332,6 +371,18 @@ int main( void ) {
 		}
 		if( player.y >= MAP_HEIGHT ) break;
 	}
+
+	//==============================
+   // 5 is max Y for monster closet
+   //===============================
+	entities[0] = ( Entity ){ 2.0f, 2.0f, 1.0f, ( Color ) { 255, 0, 0, 200 }, 0 };     // Red, fast chase
+	entities[1] = ( Entity ){ 2.0f, 4.0f, 0.5f, ( Color ) { 0, 255, 0, 200 }, 1 };   // Green, slow wander
+	entities[2] = ( Entity ){ 4.0f, 2.0f, 0.0f, ( Color ) { 0, 0, 255, 200 }, 2 };   // Blue, stationary
+	entities[3] = ( Entity ){ 2.0f, 6.0f, 1.5f, ( Color ) { 255, 255, 0, 200 }, 0 }; // Yellow, very fast chase
+	entities[4] = ( Entity ){ 6.0f, 2.0f, 0.7f, ( Color ) { 0, 255, 255, 200 }, 1 }; // Cyan, moderate wander
+	entities[5] = ( Entity ){ 4.0f, 4.0f, 0.0f, ( Color ) { 255, 0, 255, 200 }, 2 }; // Magenta, stationary	// Magenta, stationary
+
+	RenderTexture2D target = LoadRenderTexture( 800, 600 );
 
 	for( int y = 0; y < MAP_HEIGHT; y++ ) {
 		for( int x = 0; x < MAP_WIDTH; x++ ) {
@@ -394,10 +445,10 @@ int main( void ) {
 
 		// Collision check with larger buffer and diagonal collision check
 		float collisionBuffer = 0.1;
-		int			newCellX = ( int )newX;
-		int			newCellY = ( int )newY;
-		int			currCellX = ( int )player.x;
-		int			currCellY = ( int )player.y;
+		int			newCellX = ( int )roundf(newX);
+		int			newCellY = ( int )roundf(newY);
+		int			currCellX = ( int )roundf(player.x);
+		int			currCellY = ( int )roundf(player.y);
 
 		// Original X-axis check with diagonal corners
 		bool xPassable = isPassable( ( int )( newX + collisionBuffer ), ( int )player.y ) &&
@@ -444,7 +495,7 @@ int main( void ) {
 
 
 		UpdateDoors( &map, dt );
-		UpdateEnemy( &enemy, &player, &map, dt );
+		UpdateEntities( entities, NUM_ENTITIES, &player, &map, dt );
 
 		BeginTextureMode( target );
 		ClearBackground( BLACK );
@@ -501,8 +552,7 @@ int main( void ) {
 			DrawTexturePro( wallTexture, srcRect, destRect, ( Vector2 ) { 0, 0 }, 0.0f, shade );
 
 		}
-		DrawEnemy( &enemy, &player );
-
+		DrawEntities( entities, NUM_ENTITIES, &player, &map );
 		DrawFPS( 10, 10 );
 		EndTextureMode();
 
@@ -515,15 +565,9 @@ int main( void ) {
 		float offsetY = ( screenHeight - 600 * scale ) / 2;
 
 		DrawTexturePro( target.texture,
-						( Rectangle ) {
-			0, 0, ( float )target.texture.width, ( float )-target.texture.height
-		},
-						( Rectangle ) {
-			offsetX, offsetY, 800 * scale, 600 * scale
-		},  // Proper scaling
-						( Vector2 ) {
-			0, 0
-		}, 0.0f, WHITE );
+						( Rectangle )  { 0, 0, ( float )target.texture.width, ( float )-target.texture.height },
+						( Rectangle ) { offsetX, offsetY, 800 * scale, 600 * scale },  // Proper scaling
+						( Vector2 ) { 0, 0 }, 0.0f, WHITE );
 
 
 
