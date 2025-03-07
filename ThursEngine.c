@@ -17,9 +17,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define MAP_WIDTH		 16
-#define MAP_HEIGHT		 16
-#define NUM_RAYS		 160
+#define MAP_WIDTH		 64
+#define MAP_HEIGHT		 64
+#define NUM_RAYS		 640
 
 #define TEXTURE_WIDTH	 64
 #define SCREEN_H		800
@@ -48,7 +48,7 @@ typedef struct {
 } Entity;
 Entity entities[NUM_ENTITIES];
 
-typedef enum{ CLOSED, OPENING, OPEN, CLOSING } DoorState;
+typedef enum { CLOSED, OPENING, OPEN, CLOSING } DoorState;
 typedef struct {
 	int			width;
 	int			height;
@@ -63,25 +63,22 @@ typedef struct {
 Map map = {
 	.width = MAP_WIDTH,
 	.height = MAP_HEIGHT,
-	.data = {											
-		1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-		1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 
-		1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1,
-		1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1,
-		1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
-		1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 2, 1, 1,
-		1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
-		1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
-		1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
-		1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
-		1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1,
-		1, 0, 0, 1, 0, 1, 1, 2, 1, 1, 0, 0, 1, 0, 0, 1,
-		1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 2, 0, 0, 1,
-		1, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1,
-		1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1,
-		1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 1
-	}
+	.data = {0}
 };
+
+void GenerateMap( Map* m ) {
+	for( int y = 0; y < MAP_HEIGHT; y++ ) {
+		for( int x = 0; x < MAP_WIDTH; x++ ) {
+			if( y == 0 || y == MAP_HEIGHT - 1 || x == 0 || x == MAP_WIDTH - 1 ) {
+				m->data[y * MAP_WIDTH + x] = 1; // Solid walls at borders
+			} else if( rand() % 100 < 10 ) { // 10% chance of placing walls randomly
+				m->data[y * MAP_WIDTH + x] = 1;
+			} else {
+				m->data[y * MAP_WIDTH + x] = 0; // Open space
+			}
+		}
+	}
+}
 
 // Door collision helper.
 bool isPassable( int x, int y ) {
@@ -140,7 +137,7 @@ float CastRay( const Player* player, Map* m, float angle, int* side, int* texX, 
 
 
 		int tile = GetMapValue( m, mapX, mapY );
-		if( tile == 1 || (tile == 2 && m->doorOpenness[mapY * m->width + mapX] < 0.5f ) ) {
+		if( tile == 1 || ( tile == 2 && m->doorOpenness[mapY * m->width + mapX] < 0.5f ) ) {
 			hit = true;
 			if( tile == 2 ) {
 				*hitType = 2; // Door hit
@@ -361,6 +358,7 @@ int main( void ) {
 	//Texture2D ceilingTexture = LoadTexture( "ceiling.png" );
 	SetTextureFilter( wallTexture, TEXTURE_FILTER_POINT );
 
+	GenerateMap( &map );
 
 	Player player = { 10.0f, 10.0f, 0.0f, PI / 3, 2.0f, 0.002f, 1.4f };
 	while( !isPassable( ( int )player.x, ( int )player.y ) ) {
@@ -445,26 +443,26 @@ int main( void ) {
 
 		// Collision check with larger buffer and diagonal collision check
 		float collisionBuffer = 0.1;
-		int			newCellX = ( int )roundf(newX);
-		int			newCellY = ( int )roundf(newY);
-		int			currCellX = ( int )roundf(player.x);
-		int			currCellY = ( int )roundf(player.y);
+		int			newCellX = ( int )roundf( newX );
+		int			newCellY = ( int )roundf( newY );
+		int			currCellX = ( int )roundf( player.x );
+		int			currCellY = ( int )roundf( player.y );
 
 		// Original X-axis check with diagonal corners
 		bool xPassable = isPassable( ( int )( newX + collisionBuffer ), ( int )player.y ) &&
-						 isPassable( ( int )( newX - collisionBuffer ), ( int )player.y ) &&
-						 isPassable( ( int )( newX + collisionBuffer ), ( int )( player.y + collisionBuffer ) ) && // Top-right
-						 isPassable( ( int )( newX + collisionBuffer ), ( int )( player.y - collisionBuffer ) ) && // Bottom-right
-						 isPassable( ( int )( newX - collisionBuffer ), ( int )( player.y + collisionBuffer ) ) && // Top-left
-						 isPassable( ( int )( newX - collisionBuffer ), ( int )( player.y - collisionBuffer ) );   // Bottom-left
+			isPassable( ( int )( newX - collisionBuffer ), ( int )player.y ) &&
+			isPassable( ( int )( newX + collisionBuffer ), ( int )( player.y + collisionBuffer ) ) && // Top-right
+			isPassable( ( int )( newX + collisionBuffer ), ( int )( player.y - collisionBuffer ) ) && // Bottom-right
+			isPassable( ( int )( newX - collisionBuffer ), ( int )( player.y + collisionBuffer ) ) && // Top-left
+			isPassable( ( int )( newX - collisionBuffer ), ( int )( player.y - collisionBuffer ) );   // Bottom-left
 
 		// Original Y-axis check with diagonal corners
 		bool yPassable = isPassable( ( int )player.x, ( int )( newY + collisionBuffer ) ) &&
-						 isPassable( ( int )player.x, ( int )( newY - collisionBuffer ) ) &&
-						 isPassable( ( int )( player.x + collisionBuffer ), ( int )( newY + collisionBuffer ) ) && // Top-right
-						 isPassable( ( int )( player.x - collisionBuffer ), ( int )( newY + collisionBuffer ) ) && // Top-left
-						 isPassable( ( int )( player.x + collisionBuffer ), ( int )( newY - collisionBuffer ) ) && // Bottom-right
-						 isPassable( ( int )( player.x - collisionBuffer ), ( int )( newY - collisionBuffer ) );   // Bottom-left
+			isPassable( ( int )player.x, ( int )( newY - collisionBuffer ) ) &&
+			isPassable( ( int )( player.x + collisionBuffer ), ( int )( newY + collisionBuffer ) ) && // Top-right
+			isPassable( ( int )( player.x - collisionBuffer ), ( int )( newY + collisionBuffer ) ) && // Top-left
+			isPassable( ( int )( player.x + collisionBuffer ), ( int )( newY - collisionBuffer ) ) && // Bottom-right
+			isPassable( ( int )( player.x - collisionBuffer ), ( int )( newY - collisionBuffer ) );   // Bottom-left
 
 		if( xPassable ) player.x = newX;
 		if( yPassable ) player.y = newY;
@@ -511,7 +509,7 @@ int main( void ) {
 				int yOffset = i + j;
 				if( yOffset >= screenHeight ) break;
 				// Dithering procedure
-				int blockX = (yOffset * screenWidth) / 4;
+				int blockX = ( yOffset * screenWidth ) / 4;
 				int blockY = yOffset / 4;
 				int noise = ( hash( ( unsigned int )( blockX + blockY ), 0 ) % 10 ) - 5;
 				int shade = baseShade + noise;
@@ -565,9 +563,15 @@ int main( void ) {
 		float offsetY = ( screenHeight - 600 * scale ) / 2;
 
 		DrawTexturePro( target.texture,
-						( Rectangle )  { 0, 0, ( float )target.texture.width, ( float )-target.texture.height },
-						( Rectangle ) { offsetX, offsetY, 800 * scale, 600 * scale },  // Proper scaling
-						( Vector2 ) { 0, 0 }, 0.0f, WHITE );
+						( Rectangle ) {
+			0, 0, ( float )target.texture.width, ( float )-target.texture.height
+		},
+						( Rectangle ) {
+			offsetX, offsetY, 800 * scale, 600 * scale
+		},  // Proper scaling
+						( Vector2 ) {
+			0, 0
+		}, 0.0f, WHITE );
 
 
 
