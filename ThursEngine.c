@@ -71,7 +71,7 @@ void GenerateMap( Map* m ) {
 		for( int x = 0; x < MAP_WIDTH; x++ ) {
 			if( y == 0 || y == MAP_HEIGHT - 1 || x == 0 || x == MAP_WIDTH - 1 ) {
 				m->data[y * MAP_WIDTH + x] = 1; // Solid walls at borders
-			} else if( rand() % 100 < 10 ) { // 10% chance of placing walls randomly
+			} else if( rand() % 100 < 20 ) { // 10% chance of placing walls randomly
 				m->data[y * MAP_WIDTH + x] = 1;
 			} else {
 				m->data[y * MAP_WIDTH + x] = 0; // Open space
@@ -161,6 +161,20 @@ float CastRay( const Player* player, Map* m, float angle, int* side, int* texX, 
 	if( *texX >= TEXTURE_WIDTH ) *texX = TEXTURE_WIDTH - 1;
 
 	return distance;
+}
+
+void SpawnRandEntities( Entity* entities, int count, Map* m ) {
+	int spawned = 0;
+	while( spawned < count ) {
+		int x = rand() % MAP_WIDTH;
+		int y = rand() % MAP_HEIGHT;
+
+		if( m->data[y * MAP_WIDTH + x] == 0 ) {
+			entities[spawned].x = x + 0.5f;
+			entities[spawned].y = y + 0.5f;
+			spawned++;
+		}
+	}
 }
 
 // Update enemy by moving it toward player, if not too close.
@@ -351,6 +365,8 @@ int main( void ) {
 	SetTargetFPS( 60 );
 	HideCursor();
 
+	SpawnRandEntities( entities, NUM_ENTITIES, &map );
+
 	printf( "Current Working Directory: %s\n", GetWorkingDirectory() );
 	Texture2D wallTexture = LoadTexture( "mossy.png" );
 	//Texture2D hudTexture = LoadTexture( "hud.png" );
@@ -536,18 +552,28 @@ int main( void ) {
 			float projectedPlane = ( 800 / 2 ) / tanf( player.fov / 2 );
 			float wallHeight = projectedPlane / ( correctedDistance + 0.1f );
 
-			float fog = fmaxf( 0.0f, 1.0f - ( correctedDistance / 10.0f ) );
-			float brightness = ( side == 1 ) ? 0.7f : 0.8f;
-			Color shade = ( Color ){ ( unsigned char )( 255 * fog * brightness ),
-									 ( unsigned char )( 255 * fog * brightness ),
-									 ( unsigned char )( 255 * fog * brightness ), 255 };
+			float brightness = fmaxf( 0.2f, 1.0f - ( correctedDistance / 10.0f ) );
+			brightness = powf( brightness, 2.0f );
+			Color shade = ( Color ){ ( unsigned char )( 255 * brightness ),
+									 ( unsigned char )( 255 * brightness ),
+									 ( unsigned char )( 255 * brightness ), 255 };
 			if( hitType == 2 ) {
 				shade = ( Color ){ 150, 75, 0, 255 };
 			}
 
+			//float fogIntensity = fminf( 1.0f, correctedDistance / 8.0f );
+			//Color fogColor = ( Color ){
+			//	( unsigned char )( 100 * fogIntensity ),	// Light Gray
+			//	( unsigned char )( 100 * fogIntensity ),
+			//	( unsigned char )( 100 * fogIntensity ),
+			//	( unsigned char )( 100 * fogIntensity )
+			//};
+			//DrawRectangle( i* columnWidth, ( SCREEN_H - wallHeight ) / 2, columnWidth, wallHeight, fogColor );
+
 			Rectangle srcRect = { ( float )texX, 0, 1, ( float )wallTexture.height };
 			Rectangle destRect = { i * columnWidth, ( 600 - wallHeight ) / 2, columnWidth, wallHeight };
 			DrawTexturePro( wallTexture, srcRect, destRect, ( Vector2 ) { 0, 0 }, 0.0f, shade );
+
 
 		}
 		DrawEntities( entities, NUM_ENTITIES, &player, &map );
@@ -563,15 +589,9 @@ int main( void ) {
 		float offsetY = ( screenHeight - 600 * scale ) / 2;
 
 		DrawTexturePro( target.texture,
-						( Rectangle ) {
-			0, 0, ( float )target.texture.width, ( float )-target.texture.height
-		},
-						( Rectangle ) {
-			offsetX, offsetY, 800 * scale, 600 * scale
-		},  // Proper scaling
-						( Vector2 ) {
-			0, 0
-		}, 0.0f, WHITE );
+						( Rectangle ) {0, 0, ( float )target.texture.width, ( float )-target.texture.height},
+						( Rectangle ) {offsetX, offsetY, 800 * scale, 600 * scale},
+						( Vector2 ) {0, 0}, 0.0f, WHITE );
 
 
 
