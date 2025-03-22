@@ -14,4 +14,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
+  <ItemGroup>
+    <Image Include="mossy.png" />
+    <Image Include="floor.png" />
+    <Image Include="ceiling.png" />
+  </ItemGroup>
 </Project>

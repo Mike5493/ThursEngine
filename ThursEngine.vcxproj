@@ -131,6 +131,11 @@
   <ItemGroup>
     <ClCompile Include="ThursEngine.c" />
   </ItemGroup>
+  <ItemGroup>
+    <Image Include="ceiling.png" />
+    <Image Include="floor.png" />
+    <Image Include="mossy.png" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
     <Import Project="$(VCTargetsPath)\BuildCustomizations\masm.targets" />

@@ -16,6 +16,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define MAP_WIDTH		 64
 #define MAP_HEIGHT		 64
@@ -26,6 +27,7 @@
 #define SCREEN_W		600
 
 #define NUM_ENTITIES	  6
+#define MAX_PARTICLES	100
 
 #define PI	3.14159265358979323846f
 #define CLAMP(value, min, max) ((value) < (min) ? (min) : ((value) > (max) ? (max) : (value)))
@@ -48,6 +50,16 @@ typedef struct {
 } Entity;
 Entity entities[NUM_ENTITIES];
 
+typedef struct {
+	float		x, y, z;
+	float		vx, vy, vz;
+	float		lifetime;
+	Color		color;
+} Particle;
+Particle particles[MAX_PARTICLES];
+
+
+
 typedef enum { CLOSED, OPENING, OPEN, CLOSING } DoorState;
 typedef struct {
 	int			width;
@@ -66,19 +78,26 @@ Map map = {
 	.data = {0}
 };
 
-void GenerateMap( Map* m ) {
-	for( int y = 0; y < MAP_HEIGHT; y++ ) {
-		for( int x = 0; x < MAP_WIDTH; x++ ) {
-			if( y == 0 || y == MAP_HEIGHT - 1 || x == 0 || x == MAP_WIDTH - 1 ) {
-				m->data[y * MAP_WIDTH + x] = 1; // Solid walls at borders
-			} else if( rand() % 100 < 20 ) { // 10% chance of placing walls randomly
-				m->data[y * MAP_WIDTH + x] = 1;
-			} else {
-				m->data[y * MAP_WIDTH + x] = 0; // Open space
-			}
+void LoadMapFromCSV( Map* map, const char* filename ) {
+	char filePath[256] = "C:\\Users\\botw5\\source\\repos\\ThursEngine\\"; // Base path
+    strcat_s(filePath, sizeof(filePath), filename); // Append filename to path
+
+	FILE* file = fopen( filePath, "r" );
+	if( !file ) {
+		printf( "Error: Could not open map file: %s\n", filePath );
+		return;
+	}
+
+	for( int y = 0; y < map->height; y++ ) {
+		for( int x = 0; x < map->width; x++ ) {
+			fscanf_s( file, "%d,", &map->data[y * map->width + x] );
 		}
 	}
+
+	fclose( file );
+	printf( "Map loaded successfully from: %s\n", filePath );
 }
+
 
 // Door collision helper.
 bool isPassable( int x, int y ) {
@@ -135,7 +154,6 @@ float CastRay( const Player* player, Map* m, float angle, int* side, int* texX, 
 			distance = sideDistY - deltaDistY;
 		}
 
-
 		int tile = GetMapValue( m, mapX, mapY );
 		if( tile == 1 || ( tile == 2 && m->doorOpenness[mapY * m->width + mapX] < 0.5f ) ) {
 			hit = true;
@@ -163,6 +181,63 @@ float CastRay( const Player* player, Map* m, float angle, int* side, int* texX, 
 	return distance;
 }
 
+void InitParticles( Player* player ) {
+	for( int i = 0; i < MAX_PARTICLES; i++ ) {
+		particles[i].lifetime = 0.0f;
+	}
+}
+
+void SpawnParticle( Player* player ) {
+	for( int i = 0; i < MAX_PARTICLES; i++ ) {
+		if( particles[i].lifetime <= 0.0f ) {
+			particles[i].x = player->x + ( rand() % 10 - 5 );
+			particles[i].y = player->y + ( rand() % 10 - 5 );
+			particles[i].z = ( rand() % 100 ) / 100.0f;			// 0 to 1 height
+			particles[i].vx = ( float )( rand() % 100 - 50 ) / 100.0f;
+			particles[i].vy = ( float )( rand() % 100 - 50 ) / 100.0f;
+			particles[i].vz = 0.01f;	// Slight upward drift
+			particles[i].lifetime = 4.0f + ( rand() % 100 ) / 100.0f;
+			particles[i].color = ( Color ){ 200, 200, 200, 100 };
+			break;
+		}
+	}
+}
+
+void UpdateParticles( float dt ) {
+	for( int i = 0; i < MAX_PARTICLES; i++ ) {
+		if( particles[i].lifetime > 0.0f ) {
+			particles[i].x += particles[i].vx * dt;
+			particles[i].y += particles[i].vy * dt;
+			particles[i].z += particles[i].vz * dt;
+			particles[i].lifetime -= dt;
+			if( particles[i].z > 1.0f || particles[i].lifetime <= 0.0f ) {
+				particles[i].lifetime = 0.0f;
+			}
+		}
+	}
+}
+
+void DrawParticles( Player* player ) {
+	for( int i = 0; i < MAX_PARTICLES; i++ ) {
+		if( particles[i].lifetime > 0.0f ) {
+			float dx = particles[i].x - player->x;
+			float dy = particles[i].y - player->y;
+			float distance = sqrtf( dx * dx + dy * dy );
+			if( distance < 16.0f ) {
+				float angle = atan2f( dy, dx ) - player->angle;
+				if( angle < -PI ) angle += 2 * PI;
+				if( angle > PI ) angle -= 2 * PI;
+
+				if( fabsf( angle ) < player->fov / 2 ) {
+					float screenX = SCREEN_W / 2 + tanf( angle ) * ( 500.0f / distance );
+					float screenY = SCREEN_H / 2 - ( particles[i].z * 500.0f / distance );
+					int size = ( int )( 10.0f / distance );
+					DrawRectangle( screenX - size / 2, screenY - size / 2, size, size, particles[i].color );
+				}
+			}
+		}
+	}
+}
 void SpawnRandEntities( Entity* entities, int count, Map* m ) {
 	int spawned = 0;
 	while( spawned < count ) {
@@ -366,6 +441,7 @@ int main( void ) {
 	HideCursor();
 
 	SpawnRandEntities( entities, NUM_ENTITIES, &map );
+	InitParticles(0);
 
 	printf( "Current Working Directory: %s\n", GetWorkingDirectory() );
 	Texture2D wallTexture = LoadTexture( "mossy.png" );
@@ -374,9 +450,9 @@ int main( void ) {
 	//Texture2D ceilingTexture = LoadTexture( "ceiling.png" );
 	SetTextureFilter( wallTexture, TEXTURE_FILTER_POINT );
 
-	GenerateMap( &map );
+	LoadMapFromCSV( &map, "map64.csv" );
 
-	Player player = { 10.0f, 10.0f, 0.0f, PI / 3, 2.0f, 0.002f, 1.4f };
+	Player player = { 10.0f, 10.0f, 0.0f, PI / 3, 4.0f, 0.002f, 1.4f };
 	while( !isPassable( ( int )player.x, ( int )player.y ) ) {
 		player.x += 0.1f;
 		if( player.x >= MAP_WIDTH ) {
@@ -510,6 +586,10 @@ int main( void ) {
 
 		UpdateDoors( &map, dt );
 		UpdateEntities( entities, NUM_ENTITIES, &player, &map, dt );
+		UpdateParticles( dt );
+		if( rand() % 60 == 0 ) {
+			SpawnParticle( &player );
+		}
 
 		BeginTextureMode( target );
 		ClearBackground( BLACK );
@@ -577,6 +657,7 @@ int main( void ) {
 
 		}
 		DrawEntities( entities, NUM_ENTITIES, &player, &map );
+		DrawParticles( &player );
 		DrawFPS( 10, 10 );
 		EndTextureMode();
 
@@ -592,8 +673,6 @@ int main( void ) {
 						( Rectangle ) {0, 0, ( float )target.texture.width, ( float )-target.texture.height},
 						( Rectangle ) {offsetX, offsetY, 800 * scale, 600 * scale},
 						( Vector2 ) {0, 0}, 0.0f, WHITE );
-
-
 
 		// Draw Border textures
 		//if( offsetX > 0 ) {
