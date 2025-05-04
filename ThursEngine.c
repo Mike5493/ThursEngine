@@ -80,7 +80,7 @@ Map map = {
 
 void LoadMapFromCSV( Map* map, const char* filename ) {
 	char filePath[256] = "C:\\Users\\botw5\\source\\repos\\ThursEngine\\"; // Base path
-    strcat_s(filePath, sizeof(filePath), filename); // Append filename to path
+				strcat(filePath, filename); // Append filename to path
 
 	FILE* file = fopen( filePath, "r" );
 	if( !file ) {
@@ -90,7 +90,7 @@ void LoadMapFromCSV( Map* map, const char* filename ) {
 
 	for( int y = 0; y < map->height; y++ ) {
 		for( int x = 0; x < map->width; x++ ) {
-			fscanf_s( file, "%d,", &map->data[y * map->width + x] );
+			fscanf( file, "%d,", &map->data[y * map->width + x] );
 		}
 	}
 
@@ -101,6 +101,9 @@ void LoadMapFromCSV( Map* map, const char* filename ) {
 
 // Door collision helper.
 bool isPassable( int x, int y ) {
+	// Forward declare GetMapValue function to fix implicit declaration
+	extern int GetMapValue( Map* m, int x, int y );
+
 	int tile = GetMapValue( &map, x, y );
 	if( tile == 2 ) {
 		int index = y * map.width + x;
@@ -229,10 +232,11 @@ void DrawParticles( Player* player ) {
 				if( angle > PI ) angle -= 2 * PI;
 
 				if( fabsf( angle ) < player->fov / 2 ) {
-					float screenX = SCREEN_W / 2 + tanf( angle ) * ( 500.0f / distance );
-					float screenY = SCREEN_H / 2 - ( particles[i].z * 500.0f / distance );
-					int size = ( int )( 10.0f / distance );
-					DrawRectangle( screenX - size / 2, screenY - size / 2, size, size, particles[i].color );
+					float screenX = (float)SCREEN_W / 2.0f + tanf( angle ) * ( 500.0f / distance );
+					float screenY = (float)SCREEN_H / 2.0f - ( particles[i].z * 500.0f / distance );
+					int size = (int)( 10.0f / distance );
+					float halfSize = (float)size / 2.0f;
+					DrawRectangle( (int)(screenX - halfSize), (int)(screenY - halfSize), size, size, particles[i].color );
 				}
 			}
 		}
@@ -320,14 +324,14 @@ void DrawEntities( Entity* entities, int count, const Player* player, Map* m ) {
 				bool occluded = ( occlusionDistance <= distance && occlusionDistance < 16.0f );
 
 				if( !occluded ) {
-					float screenX = GetScreenWidth() / 2 + tanf( entityAngle ) * ( 500.0f / distance );
-					int entitySize = ( int )fmaxf( 20.0f, fminf( 100.0f, 500.0f / distance ) ); // Revert to truncation for now
+					float screenX = (float)GetScreenWidth() / 2.0f + tanf( entityAngle ) * ( 500.0f / distance );
+					int entitySize = (int)fmaxf( 20.0f, fminf( 100.0f, 500.0f / distance ) );
 
 					if( screenX + entitySize > 0 && screenX - entitySize < GetScreenWidth() ) {
-						DrawRectangle( ( int )( screenX - entitySize / 2 ), // Revert to truncation
-									   ( int )( GetScreenHeight() / 2 - entitySize / 2 ),
-									   entitySize, entitySize,
-									   entities[i].color );
+						DrawRectangle( (int)( screenX - entitySize / 2.0f ),
+												(int)( GetScreenHeight() / 2.0f - entitySize / 2.0f ),
+												entitySize, entitySize,
+												entities[i].color );
 						// Debug: Confirm drawing
 						//printf("Drawing entity %d at %.1f,%.1f, distance: %.1f, occluded: %d\n", i, entities[i].x, entities[i].y, distance, occluded);
 					}
